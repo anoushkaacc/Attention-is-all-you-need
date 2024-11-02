@@ -27,7 +27,39 @@ class selfattention(nn.module):
     # queries shape: (N, querylen , heads , heads_dim)
     # keys shape: (N, key_len, heads, heads_dim)
     # energy shape : (N, heads, query_len, key_len)
+    
+    if mask is not None:
+      energy = energy.masked_fill(mask == 0, float("-1e20")) #this float means minus infinity
 
+      attention = torch.softmax(energy / (self.embed_size ** (1/2)), dim=3) #normalizing the keylength
+      out = torch.einsum("nhql,nlhd -> nqhd", [attention, values]).reshape(N, query_len, self.heads * self.head_dim)
+      # attention shape : N, heads n querylen ,keylen
+      # value shape : N, vale_len , heads , heads_dim
+      # after einsum (N, query_len , heads , head_Dim) then flatten the last two dimensions
 
+      out = self.fc_out(out)
+      return out
 
+#create the transformer block
 
+class transformerblock(nn.Module):
+  def __init__(self, embed_size, heads , dropout, forward_expansion):
+    super(transformerblock, self).__init__()
+    self.attention = selfattention(embed_size, heads)
+    self.norm1 = nn.LayerNorm(embed_size)
+    self.norm2 = nn.LayerNorm(embed_size)
+
+    self.feed_forward = nn.Sequential(
+      nn.Linear(embed_size, forward_expansion*embed_size),
+      nn.ReLU(),
+      nn.Linear(forward_expansion*embed_size, embed_size)
+    )
+    self.dropout = nn.Dropout(dropout)
+  
+  def forward(self, value, key , query, mask):
+    attention = self.attention(value, key , query, mask)
+
+    x= self.dropout(self.norm(attention+query))
+    forward = self.feed_forward(x)
+    out = self.dropout(self.norm2(forward + x))
+    return out
